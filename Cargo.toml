@@ -9,3 +9,5 @@ edition = "2018"
 [dependencies]
 zip="0.5"
 rusqlite="0.26"
+json="0.12"
+serde={version="1.0", features=["derive"]}

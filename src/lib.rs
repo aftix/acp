@@ -4,3 +4,7 @@
  *
  * See repository LICENSE for information.
  */
+
+extern crate rusqlite;
+
+pub mod deck;
