@@ -658,21 +658,423 @@ impl Deck {
     }
 }
 
+// Configuration of lasped cards in the Deck configuration options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LapsedConfig {
+    delays: Vec<i64>,
+    leech_action: i64,
+    leech_fails: i64,
+    min_interval: i64,
+    mult: i64,
+}
+
+impl LapsedConfig {
+    pub fn new(json: &json::JsonValue) -> json::JsonResult<Self> {
+        let mut lapsed = LapsedConfig {
+            delays: Vec::new(),
+            leech_action: 0,
+            leech_fails: 0,
+            min_interval: 0,
+            mult: 0,
+        };
+
+        if !json.is_object() {
+            return Err(json::JsonError::WrongType(String::from(
+                "lapse is not an object",
+            )));
+        }
+
+        // Parse the lapse configuration
+        if let Some(leech_action) = json["leechAction"].as_i64() {
+            lapsed.leech_action = leech_action;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "leech leechAction field missing or incorrect",
+            )));
+        }
+
+        if let Some(leech_fails) = json["leechFails"].as_i64() {
+            lapsed.leech_fails = leech_fails;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "leech leechFails field missing or incorrect",
+            )));
+        }
+
+        if let Some(min) = json["minInt"].as_i64() {
+            lapsed.min_interval = min;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "leech minInt field missing or incorrect",
+            )));
+        }
+
+        if let Some(mult) = json["mult"].as_i64() {
+            lapsed.mult = mult;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "leech mult field missing or incorrect",
+            )));
+        }
+
+        let ref delays = json["delays"];
+        if !delays.is_array() {
+            return Err(json::JsonError::WrongType(String::from(
+                "leech delays field missing or incorrect",
+            )));
+        }
+
+        for delay in delays.members() {
+            if !delay.is_number() {
+                return Err(json::JsonError::WrongType(String::from(
+                    "leech delays array contains non number",
+                )));
+            }
+            lapsed.delays.push(delay.as_i64().unwrap());
+        }
+
+        Ok(lapsed)
+    }
+}
+
+// Configuration of new cards in the Deck configuration options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NewConfig {
+    bury: bool,
+    delays: Vec<i64>,
+    initial_factor: i64,
+    intervals: Vec<i64>,
+    order: i64,
+    per_day: i64,
+    separate: i64,
+}
+
+impl NewConfig {
+    pub fn new(json: &json::JsonValue) -> json::JsonResult<Self> {
+        let mut new = NewConfig {
+            bury: false,
+            delays: Vec::new(),
+            initial_factor: 0,
+            intervals: Vec::new(),
+            order: 0,
+            per_day: 0,
+            separate: 0,
+        };
+
+        if !json.is_object() {
+            return Err(json::JsonError::WrongType(String::from(
+                "new is not object",
+            )));
+        }
+
+        // Parse the object
+        if let Some(bury) = json["bury"].as_bool() {
+            new.bury = bury;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "new bury field missing or incorrect",
+            )));
+        }
+
+        if let Some(initial) = json["initialFactor"].as_i64() {
+            new.initial_factor = initial;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "new initialFactor field missing or incorrect",
+            )));
+        }
+
+        if let Some(order) = json["order"].as_i64() {
+            new.order = order;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "new order field missing or incorrect",
+            )));
+        }
+
+        if let Some(perday) = json["perDay"].as_i64() {
+            new.per_day = perday;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "new perDay field missing or incorrect",
+            )));
+        }
+
+        // Parse the lists
+        let ref delays = json["delays"];
+        if !delays.is_array() {
+            return Err(json::JsonError::WrongType(String::from(
+                "new delays field missing or incorrect",
+            )));
+        }
+
+        for delay in delays.members() {
+            if let Some(i) = delay.as_i64() {
+                new.delays.push(i);
+            } else {
+                return Err(json::JsonError::WrongType(String::from(
+                    "new delay array contains non number",
+                )));
+            }
+        }
+
+        let ref ints = json["ints"];
+        if !ints.is_array() {
+            return Err(json::JsonError::WrongType(String::from(
+                "new ints field missing or incorrect",
+            )));
+        }
+
+        for int in ints.members() {
+            if let Some(i) = int.as_i64() {
+                new.intervals.push(i);
+            } else {
+                return Err(json::JsonError::WrongType(String::from(
+                    "new ints array contains non number",
+                )));
+            }
+        }
+
+        Ok(new)
+    }
+}
+
+// Configuration of review cards in the Deck configuration options
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewConfig {
+    bury: bool,
+    ease4: i64,
+    fuzz: i64,
+    interval_factor: i64,
+    max_interval: i64,
+    per_day: i64,
+}
+
+impl ReviewConfig {
+    pub fn new(json: &json::JsonValue) -> json::JsonResult<Self> {
+        let mut rev = ReviewConfig {
+            bury: false,
+            ease4: 0,
+            fuzz: 0,
+            interval_factor: 0,
+            max_interval: 0,
+            per_day: 0,
+        };
+
+        if !json.is_object() {
+            return Err(json::JsonError::WrongType(String::from(
+                "rev is not an object",
+            )));
+        }
+
+        // Parse the object
+        if let Some(bury) = json["bury"].as_bool() {
+            rev.bury = bury;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "rev bury field missing or incorrect",
+            )));
+        }
+
+        if let Some(ease) = json["ease4"].as_i64() {
+            rev.ease4 = ease;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "rev ease4 field missing or incorrect",
+            )));
+        }
+
+        if let Some(fuzz) = json["fuzz"].as_i64() {
+            rev.fuzz = fuzz;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "rev fuzz field missing or incorrect",
+            )));
+        }
+
+        if let Some(ifactor) = json["ivlFct"].as_i64() {
+            rev.interval_factor = ifactor;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "rev ivlFct field missing or incorrect",
+            )));
+        }
+
+        if let Some(max) = json["maxIvl"].as_i64() {
+            rev.max_interval = max;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "rev maxIvl field missing or incorrect",
+            )));
+        }
+
+        if let Some(perday) = json["perDay"].as_i64() {
+            rev.per_day = perday;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "rev perDay field missing or incorrect",
+            )));
+        }
+
+        Ok(rev)
+    }
+}
+
+// The deck configuration as stored in the database
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeckConfig {
+    id: i64,
+    autoplay: bool,
+    dynamic: i64,
+    lapse: Option<LapsedConfig>,
+    max_taken: i64,
+    modification_time: i64,
+    name: String,
+    new: Option<NewConfig>,
+    replay_audio: bool,
+    review: Option<ReviewConfig>,
+    timer: i64,
+    usn: i64,
+}
+
+impl DeckConfig {
+    pub fn new(id: i64, json: &json::JsonValue) -> json::JsonResult<DeckConfig> {
+        let mut conf = DeckConfig {
+            id,
+            autoplay: false,
+            dynamic: 0,
+            lapse: None,
+            max_taken: 0,
+            modification_time: 0,
+            name: String::new(),
+            new: None,
+            replay_audio: false,
+            review: None,
+            timer: 0,
+            usn: 0,
+        };
+
+        if !json.is_object() {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck config value is not an object",
+            )));
+        }
+
+        // Parse the easy stuff
+        if let Some(autoplay) = json["autoplay"].as_bool() {
+            conf.autoplay = autoplay;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck configuration autoplay field missing or incorrect",
+            )));
+        }
+
+        if let Some(dynamic) = json["dyn"].as_i64() {
+            conf.dynamic = dynamic;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck configuration dyn field missing or incorrect",
+            )));
+        }
+
+        if let Some(max) = json["maxTaken"].as_i64() {
+            conf.max_taken = max;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck configuration maxTaken field missing or incorrect",
+            )));
+        }
+
+        if let Some(modification) = json["mod"].as_i64() {
+            conf.modification_time = modification;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck configuration mod field missing or incorrect",
+            )));
+        }
+
+        if let json::JsonValue::String(ref name) = json["name"] {
+            conf.name = name.clone();
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck configuration name field missing or incorrect",
+            )));
+        }
+
+        if let Some(replayq) = json["replayq"].as_bool() {
+            conf.replay_audio = replayq;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck configuration replayq field missing or incorrect",
+            )));
+        }
+
+        if let Some(timer) = json["timer"].as_i64() {
+            conf.timer = timer;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck configuration timer field missing or incorrect",
+            )));
+        }
+
+        if let Some(usn) = json["usn"].as_i64() {
+            conf.usn = usn;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck configuration usn field missing or incorrect",
+            )));
+        }
+
+        // Parse sub objects
+        conf.lapse = Some(LapsedConfig::new(&json["lapse"])?);
+        conf.new = Some(NewConfig::new(&json["new"])?);
+        conf.review = Some(ReviewConfig::new(&json["rev"])?);
+
+        Ok(conf)
+    }
+
+    // Parse the totality of the JSON into all the deck configs
+    pub fn parse(data: &str) -> json::JsonResult<Vec<DeckConfig>> {
+        let mut confs = Vec::new();
+
+        let parsed = json::parse(data)?;
+
+        if !parsed.is_object() {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck Options is not a top level object",
+            )));
+        }
+
+        for (conf_id, conf_json) in parsed.entries() {
+            let conf_id = conf_id.parse::<i64>();
+            if let Err(_) = conf_id {
+                return Err(json::JsonError::WrongType(String::from(
+                    "Deck config key is not an id",
+                )));
+            }
+
+            confs.push(DeckConfig::new(conf_id.unwrap(), conf_json)?);
+        }
+
+        Ok(confs)
+    }
+}
+
 // The collection information as stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
-    id: i64,                // arbritrary
-    crt: i64,               // creation date in seconds
-    modification_time: i64, // Last modified time in milliseconds
-    schema_time: i64,       // schema modification time
-    version: i64,           // version
-    usn: i64,               // update sequence number
-    last_sync: i64,         // last sync time
-    config: String,         // JSON, synced config options
-    models: String,         // JSON, Note types
-    decks: Vec<Deck>,       // JSON, the decks
-    deck_configs: String,   // JSON, group options for decks
-    tags: String,           // tag cache
+    id: i64,                       // arbritrary
+    crt: i64,                      // creation date in seconds
+    modification_time: i64,        // Last modified time in milliseconds
+    schema_time: i64,              // schema modification time
+    version: i64,                  // version
+    usn: i64,                      // update sequence number
+    last_sync: i64,                // last sync time
+    config: String,                // JSON, synced config options
+    models: Vec<Model>,            // JSON, Note types
+    decks: Vec<Deck>,              // JSON, the decks
+    deck_configs: Vec<DeckConfig>, // JSON, group options for decks
+    tags: String,                  // tag cache
 }
 
 // The review log as stored in the database
