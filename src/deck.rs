@@ -414,6 +414,250 @@ pub struct Note {
     cards: Option<Vec<Card>>, // cards using this note
 }
 
+// A deck as stored in the database
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Deck {
+    epoch: i64,
+    name: String,
+    extended_review_limit: i64,
+    usn: i64,
+    collapsed: bool,
+    browser_collapsed: bool,
+    dynamic: i64,
+    extended_new_limit: i64,
+    config_id: i64,
+    id: i64,
+    modification_time: i64,
+    description: String,
+    new_today: (i64, i64),
+    learned_today: (i64, i64),
+    reviewed_today: (i64, i64),
+}
+
+impl Deck {
+    // Parse a single deck JSON
+    pub fn new(epoch: i64, json: &json::JsonValue) -> json::JsonResult<Deck> {
+        let mut deck = Deck {
+            epoch,
+            name: String::new(),
+            extended_review_limit: 10,
+            usn: 0,
+            collapsed: false,
+            browser_collapsed: false,
+            dynamic: 0,
+            extended_new_limit: 10,
+            config_id: 0,
+            id: 0,
+            modification_time: 0,
+            description: String::new(),
+            new_today: (0, 0),
+            learned_today: (0, 0),
+            reviewed_today: (0, 0),
+        };
+
+        if !json.is_object() {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck is not an object",
+            )));
+        }
+
+        // Parse the deck!
+        if let json::JsonValue::String(ref name) = json["name"] {
+            deck.name = name.clone();
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck name field missing or incorect",
+            )));
+        }
+
+        // This value is OK to be missing, defaults to 10
+        if let Some(extended_rev) = json["extended_rev"].as_i64() {
+            deck.extended_review_limit = extended_rev;
+        }
+
+        if let Some(usn) = json["usn"].as_i64() {
+            deck.usn = usn;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck usn field missing or incorect",
+            )));
+        }
+
+        if let Some(collapsed) = json["collapsed"].as_bool() {
+            deck.collapsed = collapsed;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck collapsed field missing or incorect",
+            )));
+        }
+
+        if let Some(browser_collapsed) = json["browserCollapsed"].as_bool() {
+            deck.browser_collapsed = browser_collapsed;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck browserCollapsed field missing or incorect",
+            )));
+        }
+
+        if let Some(dynamic) = json["dyn"].as_i64() {
+            deck.dynamic = dynamic;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck dyn field missing or incorect",
+            )));
+        }
+
+        // Is ok if absent, defaults to 10
+        if let Some(extended_new) = json["extendNew"].as_i64() {
+            deck.extended_new_limit = extended_new;
+        }
+
+        if let Some(conf) = json["conf"].as_i64() {
+            deck.config_id = conf;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck conf field missing or incorect",
+            )));
+        }
+
+        if let Some(id) = json["id"].as_i64() {
+            deck.id = id;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck id field missing or incorect",
+            )));
+        }
+
+        if let Some(modification) = json["mod"].as_i64() {
+            deck.modification_time = modification;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck mod field missing or incorect",
+            )));
+        }
+
+        if let json::JsonValue::String(ref desc) = json["desc"] {
+            deck.description = desc.clone();
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck desc field missing or incorect",
+            )));
+        }
+
+        // Now, parse the tuples
+        let ref new_today = json["newToday"];
+        if !new_today.is_array() {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck newToday field missing or incorect",
+            )));
+        }
+        let new_today: Vec<&json::JsonValue> = new_today.members().collect();
+        if new_today.len() != 2 {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck newToday array wrong length",
+            )));
+        }
+        if let Some(i) = new_today[0].as_i64() {
+            deck.new_today.0 = i;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck newToday array element 0 not integer",
+            )));
+        }
+        if let Some(i) = new_today[1].as_i64() {
+            deck.new_today.1 = i;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck newToday array element 1 not integer",
+            )));
+        }
+
+        let ref learned_today = json["lrnToday"];
+        if !learned_today.is_array() {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck lrnToday field missing or incorect",
+            )));
+        }
+        let learned_today: Vec<&json::JsonValue> = learned_today.members().collect();
+        if learned_today.len() != 2 {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck lrnToday array wrong length",
+            )));
+        }
+        if let Some(i) = learned_today[0].as_i64() {
+            deck.learned_today.0 = i;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck lrnToday array element 0 not integer",
+            )));
+        }
+        if let Some(i) = learned_today[1].as_i64() {
+            deck.learned_today.1 = i;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck lrnToday array element 1 not integer",
+            )));
+        }
+
+        let ref review_today = json["lrnToday"];
+        if !review_today.is_array() {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck revToday field missing or incorect",
+            )));
+        }
+        let review_today: Vec<&json::JsonValue> = review_today.members().collect();
+        if review_today.len() != 2 {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck revToday array wrong length",
+            )));
+        }
+        if let Some(i) = review_today[0].as_i64() {
+            deck.reviewed_today.0 = i;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck revToday array element 0 not integer",
+            )));
+        }
+        if let Some(i) = learned_today[1].as_i64() {
+            deck.reviewed_today.1 = i;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Deck revToday array element 1 not integer",
+            )));
+        }
+
+        Ok(deck)
+    }
+
+    // Parse the totality of the JSON into all the decks
+    pub fn parse(data: &str) -> json::JsonResult<Vec<Deck>> {
+        let mut decks = Vec::new();
+
+        let parsed = json::parse(data)?;
+
+        if !parsed.is_object() {
+            return Err(json::JsonError::WrongType(String::from(
+                "Decks are not an object at top level",
+            )));
+        }
+
+        // Every deck will be a key in the object with the key being the epoch id
+        for (deck_epoch, deck_json) in parsed.entries() {
+            let deck_epoch = deck_epoch.parse::<i64>();
+            if let Err(_) = deck_epoch {
+                return Err(json::JsonError::WrongType(String::from(
+                    "Deck does not have proper id",
+                )));
+            }
+            let deck_epoch = deck_epoch.unwrap();
+
+            decks.push(Deck::new(deck_epoch, deck_json)?);
+        }
+
+        Ok(decks)
+    }
+}
+
 // The collection information as stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
@@ -426,7 +670,7 @@ pub struct Collection {
     last_sync: i64,         // last sync time
     config: String,         // JSON, synced config options
     models: String,         // JSON, Note types
-    decks: String,          // JSON, the decks
+    decks: Vec<Deck>,       // JSON, the decks
     deck_configs: String,   // JSON, group options for decks
     tags: String,           // tag cache
 }
