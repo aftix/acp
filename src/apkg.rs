@@ -1,10 +1,16 @@
-use std::{fs, io, path::Path};
+use crate::deck;
+use std::{
+    fs, io,
+    path::{Path, PathBuf},
+};
 use tempfile;
 use zip;
 
 // Owns the temporary extracted Apkg and the collection
 pub struct Apkg {
     dir: tempfile::TempDir,
+    db_path: PathBuf,
+    collection: deck::Collection,
 }
 
 impl Apkg {
@@ -30,10 +36,8 @@ impl Apkg {
             if (&*file.name()).ends_with("/") {
                 // File is a directory, create it in tempdir
                 fs::create_dir_all(&outpath)?;
-                println!("Creating {:?}", outpath);
             } else {
                 // File is not a directory, extract it
-                println!("Extracting {:?}", outpath);
                 if let Some(p) = outpath.parent() {
                     // Create directory if needed
                     if !p.exists() {
@@ -54,7 +58,14 @@ impl Apkg {
             }
         }
 
-        let mut apkg = Apkg { dir };
+        let db_path = dir.path().join("collection.anki2");
+        let collection = deck::Collection::new(db_path.as_path()).unwrap();
+
+        let apkg = Apkg {
+            dir,
+            db_path,
+            collection,
+        };
 
         Ok(apkg)
     }

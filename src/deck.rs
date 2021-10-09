@@ -5,8 +5,12 @@
  */
 
 use json;
+use rusqlite::{params, Connection, Result};
 use serde::{Deserialize, Serialize};
-use std::io;
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 // Information about database fields found at
 // https://github.com/ankidroid/Anki-Android/wiki/Database-Structure
@@ -92,8 +96,8 @@ impl Request {
 
         let string = iter.next();
         if let Some(s) = string {
-            if let json::JsonValue::String(val) = s {
-                req.string = val.clone();
+            if let Some(val) = s.as_str() {
+                req.string = String::from(val);
             } else {
                 return Err(json::JsonError::WrongType(String::from(
                     "Request array has improper string",
@@ -138,7 +142,7 @@ pub struct Model {
     epoch: i64,
     id: i64,
     css: String,
-    deck_id: i64,
+    deck_id: Option<i64>,
     fields: Vec<Field>,
     latex_post: String,
     latex_pre: String,
@@ -170,40 +174,40 @@ impl Template {
         }
 
         // Parse template object
-        if let json::JsonValue::String(ref afmt) = json["afmt"] {
-            template.answer_format = afmt.clone();
+        if let Some(afmt) = json["afmt"].as_str() {
+            template.answer_format = String::from(afmt);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "Template afmt is missing or incorrect",
             )));
         }
 
-        if let json::JsonValue::String(ref bafmt) = json["bafmt"] {
-            template.back_format = bafmt.clone();
+        if let Some(fmt) = json["bafmt"].as_str() {
+            template.back_format = String::from(fmt);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "Template bafmt is missing or incorrect",
             )));
         }
 
-        if let json::JsonValue::String(ref bqfmt) = json["bqfmt"] {
-            template.browser_format = bqfmt.clone();
+        if let Some(bqfmt) = json["bqfmt"].as_str() {
+            template.browser_format = String::from(bqfmt);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "Template bqfmt is missing or incorrect",
             )));
         }
 
-        if let json::JsonValue::String(ref qfmt) = json["qfmt"] {
-            template.question_format = qfmt.clone();
+        if let Some(qfmt) = json["qfmt"].as_str() {
+            template.question_format = String::from(qfmt);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "Template qfmt is missing or incorrect",
             )));
         }
 
-        if let json::JsonValue::String(ref name) = json["name"] {
-            template.name = name.clone();
+        if let Some(name) = json["name"].as_str() {
+            template.name = String::from(name);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "Template qfmt is missing or incorrect",
@@ -233,7 +237,7 @@ impl Model {
             epoch,
             id: 0,
             css: String::from(""),
-            deck_id: 0,
+            deck_id: None,
             fields: Vec::new(),
             latex_post: String::from(""),
             latex_pre: String::from(""),
@@ -256,20 +260,25 @@ impl Model {
         // Get the easy fields from the JSONValue
         // tags, vers ignored
 
-        if let json::JsonValue::String(ref css) = json_model["css"] {
-            model.css = css.clone();
+        if let Some(css) = json_model["css"].as_str() {
+            model.css = String::from(css);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "CSS field missing or incorrect",
             )));
         }
 
+        // Can be missing
         if let Some(deck_id) = json_model["did"].as_i64() {
-            model.deck_id = deck_id;
-        } else {
-            return Err(json::JsonError::WrongType(String::from(
-                "Deck ID field missing or incorrect",
-            )));
+            model.deck_id = Some(deck_id);
+        } else if let Some(deck_id) = json_model["did"].as_str() {
+            let deck_id = deck_id.parse::<i64>();
+            if let Err(_) = deck_id {
+                return Err(json::JsonError::WrongType(String::from(
+                    "Deck ID field missing or incorrect",
+                )));
+            }
+            model.deck_id = Some(deck_id.unwrap());
         }
 
         if let Some(id) = json_model["id"].as_i64() {
@@ -280,16 +289,16 @@ impl Model {
             )));
         }
 
-        if let json::JsonValue::String(ref pre) = json_model["latexPre"] {
-            model.latex_pre = pre.clone();
+        if let Some(pre) = json_model["latexPre"].as_str() {
+            model.latex_pre = String::from(pre);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "latexPre field missing or incorrect",
             )));
         }
 
-        if let json::JsonValue::String(ref post) = json_model["latexPost"] {
-            model.latex_post = post.clone();
+        if let Some(post) = json_model["latexPost"].as_str() {
+            model.latex_post = String::from(post);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "latexPost field missing or incorrect",
@@ -304,8 +313,8 @@ impl Model {
             )));
         }
 
-        if let json::JsonValue::String(ref name) = json_model["name"] {
-            model.name = name.clone();
+        if let Some(name) = json_model["name"].as_str() {
+            model.name = String::from(name);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "name field missing or incorrect",
@@ -463,8 +472,8 @@ impl Deck {
         }
 
         // Parse the deck!
-        if let json::JsonValue::String(ref name) = json["name"] {
-            deck.name = name.clone();
+        if let Some(name) = json["name"].as_str() {
+            deck.name = String::from(name);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "Deck name field missing or incorect",
@@ -537,8 +546,8 @@ impl Deck {
             )));
         }
 
-        if let json::JsonValue::String(ref desc) = json["desc"] {
-            deck.description = desc.clone();
+        if let Some(desc) = json["desc"].as_str() {
+            deck.description = String::from(desc);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "Deck desc field missing or incorect",
@@ -662,11 +671,11 @@ impl Deck {
 // Configuration of lasped cards in the Deck configuration options
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LapsedConfig {
-    delays: Vec<i64>,
+    delays: Vec<f64>,
     leech_action: i64,
     leech_fails: i64,
     min_interval: i64,
-    mult: i64,
+    mult: f64,
 }
 
 impl LapsedConfig {
@@ -676,7 +685,7 @@ impl LapsedConfig {
             leech_action: 0,
             leech_fails: 0,
             min_interval: 0,
-            mult: 0,
+            mult: 0.0,
         };
 
         if !json.is_object() {
@@ -710,7 +719,7 @@ impl LapsedConfig {
             )));
         }
 
-        if let Some(mult) = json["mult"].as_i64() {
+        if let Some(mult) = json["mult"].as_f64() {
             lapsed.mult = mult;
         } else {
             return Err(json::JsonError::WrongType(String::from(
@@ -731,7 +740,7 @@ impl LapsedConfig {
                     "leech delays array contains non number",
                 )));
             }
-            lapsed.delays.push(delay.as_i64().unwrap());
+            lapsed.delays.push(delay.as_f64().unwrap());
         }
 
         Ok(lapsed)
@@ -742,7 +751,7 @@ impl LapsedConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewConfig {
     bury: bool,
-    delays: Vec<i64>,
+    delays: Vec<f64>,
     initial_factor: i64,
     intervals: Vec<i64>,
     order: i64,
@@ -810,7 +819,7 @@ impl NewConfig {
         }
 
         for delay in delays.members() {
-            if let Some(i) = delay.as_i64() {
+            if let Some(i) = delay.as_f64() {
                 new.delays.push(i);
             } else {
                 return Err(json::JsonError::WrongType(String::from(
@@ -844,10 +853,10 @@ impl NewConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewConfig {
     bury: bool,
-    ease4: i64,
-    fuzz: i64,
-    interval_factor: i64,
-    max_interval: i64,
+    ease4: f64,
+    fuzz: Option<f64>,
+    interval_factor: f64,
+    max_interval: f64,
     per_day: i64,
 }
 
@@ -855,10 +864,10 @@ impl ReviewConfig {
     pub fn new(json: &json::JsonValue) -> json::JsonResult<Self> {
         let mut rev = ReviewConfig {
             bury: false,
-            ease4: 0,
-            fuzz: 0,
-            interval_factor: 0,
-            max_interval: 0,
+            ease4: 0.0,
+            fuzz: None,
+            interval_factor: 0.0,
+            max_interval: 0.0,
             per_day: 0,
         };
 
@@ -877,7 +886,7 @@ impl ReviewConfig {
             )));
         }
 
-        if let Some(ease) = json["ease4"].as_i64() {
+        if let Some(ease) = json["ease4"].as_f64() {
             rev.ease4 = ease;
         } else {
             return Err(json::JsonError::WrongType(String::from(
@@ -885,15 +894,12 @@ impl ReviewConfig {
             )));
         }
 
-        if let Some(fuzz) = json["fuzz"].as_i64() {
-            rev.fuzz = fuzz;
-        } else {
-            return Err(json::JsonError::WrongType(String::from(
-                "rev fuzz field missing or incorrect",
-            )));
+        // Can be missing
+        if let Some(fuzz) = json["fuzz"].as_f64() {
+            rev.fuzz = Some(fuzz);
         }
 
-        if let Some(ifactor) = json["ivlFct"].as_i64() {
+        if let Some(ifactor) = json["ivlFct"].as_f64() {
             rev.interval_factor = ifactor;
         } else {
             return Err(json::JsonError::WrongType(String::from(
@@ -901,7 +907,7 @@ impl ReviewConfig {
             )));
         }
 
-        if let Some(max) = json["maxIvl"].as_i64() {
+        if let Some(max) = json["maxIvl"].as_f64() {
             rev.max_interval = max;
         } else {
             return Err(json::JsonError::WrongType(String::from(
@@ -926,7 +932,7 @@ impl ReviewConfig {
 pub struct DeckConfig {
     id: i64,
     autoplay: bool,
-    dynamic: i64,
+    dynamic: bool,
     lapse: Option<LapsedConfig>,
     max_taken: i64,
     modification_time: i64,
@@ -939,11 +945,11 @@ pub struct DeckConfig {
 }
 
 impl DeckConfig {
-    pub fn new(id: i64, json: &json::JsonValue) -> json::JsonResult<DeckConfig> {
+    pub fn new(id: i64, json: &json::JsonValue) -> json::JsonResult<Self> {
         let mut conf = DeckConfig {
             id,
             autoplay: false,
-            dynamic: 0,
+            dynamic: false,
             lapse: None,
             max_taken: 0,
             modification_time: 0,
@@ -970,7 +976,7 @@ impl DeckConfig {
             )));
         }
 
-        if let Some(dynamic) = json["dyn"].as_i64() {
+        if let Some(dynamic) = json["dyn"].as_bool() {
             conf.dynamic = dynamic;
         } else {
             return Err(json::JsonError::WrongType(String::from(
@@ -994,8 +1000,8 @@ impl DeckConfig {
             )));
         }
 
-        if let json::JsonValue::String(ref name) = json["name"] {
-            conf.name = name.clone();
+        if let Some(name) = json["name"].as_str() {
+            conf.name = String::from(name);
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "Deck configuration name field missing or incorrect",
@@ -1035,7 +1041,7 @@ impl DeckConfig {
     }
 
     // Parse the totality of the JSON into all the deck configs
-    pub fn parse(data: &str) -> json::JsonResult<Vec<DeckConfig>> {
+    pub fn parse(data: &str) -> json::JsonResult<Vec<Self>> {
         let mut confs = Vec::new();
 
         let parsed = json::parse(data)?;
@@ -1071,14 +1077,14 @@ pub struct SyncConfig {
     time_limit: i64,
     estimated_times: bool,
     due_counts: bool,
-    current_model: String,
+    current_model: i64,
     next_pos: i64,
-    sort_type: String,
+    sort_type: Option<String>,
     sort_backwards: bool,
     add_to_current: bool,
     day_learn_first: bool,
-    new_bury: bool,
-    last_unburied: i64,
+    new_bury: Option<bool>,
+    last_unburied: Option<i64>,
     active_cols: Vec<String>,
 }
 
@@ -1092,14 +1098,14 @@ impl SyncConfig {
             time_limit: 0,
             estimated_times: false,
             due_counts: false,
-            current_model: String::new(),
+            current_model: 0,
             next_pos: 0,
-            sort_type: String::new(),
+            sort_type: None,
             sort_backwards: false,
             add_to_current: false,
             day_learn_first: false,
-            new_bury: false,
-            last_unburied: 0,
+            new_bury: None,
+            last_unburied: None,
             active_cols: Vec::new(),
         };
 
@@ -1160,8 +1166,8 @@ impl SyncConfig {
             )));
         }
 
-        if let json::JsonValue::String(ref cur) = json["curModel"] {
-            conf.current_model = cur.clone();
+        if let Some(cur) = json["curModel"].as_i64() {
+            conf.current_model = cur;
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "SyncConfig curModel field is missing or incorrect",
@@ -1176,12 +1182,9 @@ impl SyncConfig {
             )));
         }
 
-        if let json::JsonValue::String(ref sort) = json["sortType"] {
-            conf.sort_type = sort.clone();
-        } else {
-            return Err(json::JsonError::WrongType(String::from(
-                "SyncConfig sortType field is missing or incorrect",
-            )));
+        // Can be missing
+        if let Some(sort) = json["sortType"].as_str() {
+            conf.sort_type = Some(String::from(sort));
         }
 
         if let Some(sort) = json["sortBackwards"].as_bool() {
@@ -1208,20 +1211,14 @@ impl SyncConfig {
             )));
         }
 
+        // Can be missing
         if let Some(newbury) = json["newBury"].as_bool() {
-            conf.new_bury = newbury;
-        } else {
-            return Err(json::JsonError::WrongType(String::from(
-                "SyncConfig newBury field is missing or incorrect",
-            )));
+            conf.new_bury = Some(newbury);
         }
 
+        // Can be missing
         if let Some(last) = json["lastUnburied"].as_i64() {
-            conf.last_unburied = last;
-        } else {
-            return Err(json::JsonError::WrongType(String::from(
-                "SyncConfig lastUnburied field is missing or incorrect",
-            )));
+            conf.last_unburied = Some(last);
         }
 
         // Parse the lists
@@ -1246,8 +1243,8 @@ impl SyncConfig {
         let ref active = json["activeCols"];
         if active.is_array() {
             for j in active.members() {
-                if let json::JsonValue::String(ref col) = j {
-                    conf.active_cols.push(col.clone());
+                if let Some(col) = j.as_str() {
+                    conf.active_cols.push(String::from(col));
                 } else {
                     return Err(json::JsonError::WrongType(String::from(
                         "SyncConfig activeCols contains non string",
@@ -1284,24 +1281,42 @@ pub struct Collection {
     decks: Vec<Deck>,              // JSON, the decks
     deck_configs: Vec<DeckConfig>, // JSON, group options for decks
     tags: String,                  // tag cache
+    notes: Vec<Note>,
 }
 
 impl Collection {
-    pub fn new() -> io::Result<Self> {
-        let mut collection = Collection {
-            id: 0,
-            crt: 0,
-            modification_time: 0,
-            schema_time: 0,
-            version: 0,
-            usn: 0,
-            last_sync: 0,
-            config: SyncConfig::new("{}").unwrap(),
-            models: Vec::new(),
-            decks: Vec::new(),
-            deck_configs: Vec::new(),
-            tags: String::new(),
-        };
+    // Build a connection from a .anki2 sqlite database
+    pub fn new(path: &Path) -> Result<Self> {
+        // Connection to the database
+        let conn = Connection::open(path)?;
+
+        // Start by loading the single row of the col table into the collection
+        let mut stmt = conn.prepare(
+            "SELECT id, crt, mod, scm, ver, usn, ls, conf, models, decks, dconf, tags FROM col",
+        )?;
+        let mut col_iter = stmt.query_map([], |row| {
+            let config_txt: String = row.get(7)?;
+            let model_txt: String = row.get(8)?;
+            let deck_txt: String = row.get(9)?;
+            let dconf_txt: String = row.get(10)?;
+            Ok(Collection {
+                id: row.get(0)?,
+                crt: row.get(1)?,
+                modification_time: row.get(2)?,
+                schema_time: row.get(3)?,
+                version: row.get(4)?,
+                usn: row.get(5)?,
+                last_sync: row.get(6)?,
+                config: SyncConfig::new(&config_txt).unwrap(),
+                models: Model::parse(&model_txt).unwrap(),
+                decks: Deck::parse(&deck_txt).unwrap(),
+                deck_configs: DeckConfig::parse(&dconf_txt).unwrap(),
+                tags: row.get(11)?,
+                notes: Vec::new(),
+            })
+        })?;
+
+        let mut collection = col_iter.next().unwrap()?.clone();
 
         Ok(collection)
     }
