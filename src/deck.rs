@@ -1060,6 +1060,214 @@ impl DeckConfig {
     }
 }
 
+// Synced configuration options as represented in the database
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SyncConfig {
+    current_deck: i64,
+    active_decks: Vec<i64>,
+    new_spread: i64,
+    collapse_time: i64,
+    time_limit: i64,
+    estimated_times: bool,
+    due_counts: bool,
+    current_model: String,
+    next_pos: i64,
+    sort_type: String,
+    sort_backwards: bool,
+    add_to_current: bool,
+    day_learn_first: bool,
+    new_bury: bool,
+    last_unburied: i64,
+    active_cols: Vec<String>,
+}
+
+impl SyncConfig {
+    pub fn new(data: &str) -> json::JsonResult<Self> {
+        let mut conf = SyncConfig {
+            current_deck: 0,
+            active_decks: Vec::new(),
+            new_spread: 0,
+            collapse_time: 0,
+            time_limit: 0,
+            estimated_times: false,
+            due_counts: false,
+            current_model: String::new(),
+            next_pos: 0,
+            sort_type: String::new(),
+            sort_backwards: false,
+            add_to_current: false,
+            day_learn_first: false,
+            new_bury: false,
+            last_unburied: 0,
+            active_cols: Vec::new(),
+        };
+
+        let json = json::parse(data)?;
+
+        if !json.is_object() {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig is not an object",
+            )));
+        }
+
+        // Get the options from the JSON
+        if let Some(cur) = json["curDeck"].as_i64() {
+            conf.current_deck = cur;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig curDeck field is missing or incorrect",
+            )));
+        }
+
+        if let Some(spread) = json["newSpread"].as_i64() {
+            conf.new_spread = spread;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig newSpread field is missing or incorrect",
+            )));
+        }
+
+        if let Some(collapse) = json["collapseTime"].as_i64() {
+            conf.collapse_time = collapse;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig collapseTime field is missing or incorrect",
+            )));
+        }
+
+        if let Some(time) = json["timeLim"].as_i64() {
+            conf.time_limit = time;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig timeLim field is missing or incorrect",
+            )));
+        }
+
+        if let Some(est) = json["estTimes"].as_bool() {
+            conf.estimated_times = est;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig estTimes field is missing or incorrect",
+            )));
+        }
+
+        if let Some(due) = json["dueCounts"].as_bool() {
+            conf.due_counts = due;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig dueCounts field is missing or incorrect",
+            )));
+        }
+
+        if let json::JsonValue::String(ref cur) = json["curModel"] {
+            conf.current_model = cur.clone();
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig curModel field is missing or incorrect",
+            )));
+        }
+
+        if let Some(pos) = json["nextPos"].as_i64() {
+            conf.next_pos = pos;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig nextPos field is missing or incorrect",
+            )));
+        }
+
+        if let json::JsonValue::String(ref sort) = json["sortType"] {
+            conf.sort_type = sort.clone();
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig sortType field is missing or incorrect",
+            )));
+        }
+
+        if let Some(sort) = json["sortBackwards"].as_bool() {
+            conf.sort_backwards = sort;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig sortBackwards field is missing or incorrect",
+            )));
+        }
+
+        if let Some(add) = json["addToCur"].as_bool() {
+            conf.add_to_current = add;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig addToCur field is missing or incorrect",
+            )));
+        }
+
+        if let Some(day) = json["dayLearnFirst"].as_bool() {
+            conf.day_learn_first = day;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig dayLearnFirst field is missing or incorrect",
+            )));
+        }
+
+        if let Some(newbury) = json["newBury"].as_bool() {
+            conf.new_bury = newbury;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig newBury field is missing or incorrect",
+            )));
+        }
+
+        if let Some(last) = json["lastUnburied"].as_i64() {
+            conf.last_unburied = last;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig lastUnburied field is missing or incorrect",
+            )));
+        }
+
+        // Parse the lists
+        let ref active = json["activeDecks"];
+        if !active.is_array() {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig activeDecks field is missing or incorrect",
+            )));
+        }
+
+        for j in active.members() {
+            if let Some(i) = j.as_i64() {
+                conf.active_decks.push(i);
+            } else {
+                return Err(json::JsonError::WrongType(String::from(
+                    "SyncConfig activeDecks contains non number",
+                )));
+            }
+        }
+
+        // This one can be missing
+        let ref active = json["activeCols"];
+        if active.is_array() {
+            for j in active.members() {
+                if let json::JsonValue::String(ref col) = j {
+                    conf.active_cols.push(col.clone());
+                } else {
+                    return Err(json::JsonError::WrongType(String::from(
+                        "SyncConfig activeCols contains non string",
+                    )));
+                }
+            }
+        } else if active == &json::JsonValue::Null {
+            conf.active_cols.push(String::from("noteFld"));
+            conf.active_cols.push(String::from("template"));
+            conf.active_cols.push(String::from("cardDue"));
+            conf.active_cols.push(String::from("deck"));
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "SyncConfig activeCols is incorrect",
+            )));
+        }
+
+        Ok(conf)
+    }
+}
+
 // The collection information as stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
@@ -1070,7 +1278,7 @@ pub struct Collection {
     version: i64,                  // version
     usn: i64,                      // update sequence number
     last_sync: i64,                // last sync time
-    config: String,                // JSON, synced config options
+    config: SyncConfig,            // JSON, synced config options
     models: Vec<Model>,            // JSON, Note types
     decks: Vec<Deck>,              // JSON, the decks
     deck_configs: Vec<DeckConfig>, // JSON, group options for decks
