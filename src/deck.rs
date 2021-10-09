@@ -412,16 +412,15 @@ impl Model {
 // The note as stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Note {
-    id: i64,                  // Note id
-    guid: i64,                // Globally unique ID
-    model_id: i64,            // Model ID
-    mod_time: i64,            // Modification time
-    usn: i64,                 // update sequence number
-    tags: Vec<String>,        // tags on the note
-    fields: Vec<String>,      // Field values
-    sort_field: i64,          // Sort field,
-    sum: i64,                 // Field checksum
-    cards: Option<Vec<Card>>, // cards using this note
+    id: i64,             // Note id
+    guid: String,        // Globally unique ID
+    model_id: i64,       // Model ID
+    mod_time: i64,       // Modification time
+    usn: i64,            // update sequence number
+    tags: Vec<String>,   // tags on the note
+    fields: Vec<String>, // Field values
+    sort_field: String,  // Sort field,
+    sum: i64,            // Field checksum
 }
 
 // A deck as stored in the database
@@ -1266,6 +1265,28 @@ impl SyncConfig {
     }
 }
 
+// The review log as stored in the database
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ReviewLog {
+    id: i64,            // epoch-milliseconds of when the review was done
+    card_id: i64,       // Card id
+    usn: i64,           // update sequence number
+    ease: i64,          // Which button was pressed on the review
+    interval: i64,      // Card interval
+    last_interval: i64, // Previous card interval
+    factor: i64,        // factor
+    time: i64,          // How long the review took in milliseconds
+    card_type: i64,     // As in card_db
+}
+
+// The graves as stored in the database
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Grave {
+    usn: i64,
+    oid: i64,
+    grave_type: i64,
+}
+
 // The collection information as stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Collection {
@@ -1281,7 +1302,10 @@ pub struct Collection {
     decks: Vec<Deck>,              // JSON, the decks
     deck_configs: Vec<DeckConfig>, // JSON, group options for decks
     tags: String,                  // tag cache
-    notes: Vec<Note>,
+    notes: Vec<Note>,              // Notes
+    cards: Vec<Card>,              // Cards
+    revlog: Vec<ReviewLog>,        // Review log
+    graves: Vec<Grave>,            // Deleted things
 }
 
 impl Collection {
@@ -1313,25 +1337,91 @@ impl Collection {
                 deck_configs: DeckConfig::parse(&dconf_txt).unwrap(),
                 tags: row.get(11)?,
                 notes: Vec::new(),
+                cards: Vec::new(),
+                revlog: Vec::new(),
+                graves: Vec::new(),
             })
         })?;
 
         let mut collection = col_iter.next().unwrap()?.clone();
 
+        // Load the cards
+        let mut stmt = conn.prepare("SELECT id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags FROM cards")?;
+        let card_iter = stmt.query_map([], |row| {
+            Ok(Card {
+                id: row.get(0)?,
+                note_id: row.get(1)?,
+                deck_id: row.get(2)?,
+                ordinal: row.get(3)?,
+                modification_time: row.get(4)?,
+                usn: row.get(5)?,
+                card_type: row.get(6)?,
+                queue: row.get(7)?,
+                due: row.get(8)?,
+                interval: row.get(9)?,
+                factor: row.get(10)?,
+                reps: row.get(11)?,
+                left: row.get(12)?,
+                original_due: row.get(13)?,
+                original_deck_id: row.get(14)?,
+                flags: row.get(15)?,
+            })
+        })?;
+
+        collection.cards = card_iter.map(|result| result.unwrap()).collect();
+
+        // Load the notes
+        let mut stmt =
+            conn.prepare("SELECT id, guid, mid, mod, usn, tags, flds, sfld, csum FROM notes")?;
+        let note_iter = stmt.query_map([], |row| {
+            let tags: String = row.get(5)?;
+            let fields: String = row.get(6)?;
+            Ok(Note {
+                id: row.get(0)?,
+                guid: row.get(1)?,
+                model_id: row.get(2)?,
+                mod_time: row.get(3)?,
+                usn: row.get(4)?,
+                tags: tags.split(" ").map(String::from).collect(),
+                fields: fields.split("\0x1f").map(String::from).collect(),
+                sort_field: row.get(7)?,
+                sum: row.get(8)?,
+            })
+        })?;
+
+        collection.notes = note_iter.map(|result| result.unwrap()).collect();
+
+        // Load the review log
+        let mut stmt = conn
+            .prepare("SELECT id, cid, usn, ease, ivl, lastIvl, factor, time, type FROM revlog")?;
+        let rev_iter = stmt.query_map([], |row| {
+            Ok(ReviewLog {
+                id: row.get(0)?,
+                card_id: row.get(1)?,
+                usn: row.get(2)?,
+                ease: row.get(3)?,
+                interval: row.get(4)?,
+                last_interval: row.get(5)?,
+                factor: row.get(6)?,
+                time: row.get(7)?,
+                card_type: row.get(8)?,
+            })
+        })?;
+
+        collection.revlog = rev_iter.map(|result| result.unwrap()).collect();
+
+        // Load the graves
+        let mut stmt = conn.prepare("SELECT usn, oid, type FROM graves")?;
+        let grave_iter = stmt.query_map([], |row| {
+            Ok(Grave {
+                usn: row.get(0)?,
+                oid: row.get(1)?,
+                grave_type: row.get(2)?,
+            })
+        })?;
+
+        collection.graves = grave_iter.map(|result| result.unwrap()).collect();
+
         Ok(collection)
     }
-}
-
-// The review log as stored in the database
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Revlog {
-    id: i64,            // epoch-milliseconds of when the review was done
-    card_id: i64,       // Card id
-    usn: i64,           // update sequence number
-    ease: i64,          // Which button was pressed on the review
-    interval: i64,      // Card interval
-    last_interval: i64, // Previous card interval
-    factor: i64,        // factor
-    time: i64,          // How long the review took in milliseconds
-    card_type: i64,     // As in card_db
 }
