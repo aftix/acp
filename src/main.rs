@@ -1,3 +1,9 @@
+use acp::apkg;
+
+use std::path::Path;
+
 fn main() {
-    println!("Hello, world!");
+    let path = Path::new("./test.apkg");
+
+    let apkg = apkg::Apkg::new(&path).unwrap();
 }

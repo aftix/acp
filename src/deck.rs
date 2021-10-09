@@ -6,6 +6,7 @@
 
 use json;
 use serde::{Deserialize, Serialize};
+use std::io;
 
 // Information about database fields found at
 // https://github.com/ankidroid/Anki-Android/wiki/Database-Structure
@@ -1283,6 +1284,27 @@ pub struct Collection {
     decks: Vec<Deck>,              // JSON, the decks
     deck_configs: Vec<DeckConfig>, // JSON, group options for decks
     tags: String,                  // tag cache
+}
+
+impl Collection {
+    pub fn new() -> io::Result<Self> {
+        let mut collection = Collection {
+            id: 0,
+            crt: 0,
+            modification_time: 0,
+            schema_time: 0,
+            version: 0,
+            usn: 0,
+            last_sync: 0,
+            config: SyncConfig::new("{}").unwrap(),
+            models: Vec::new(),
+            decks: Vec::new(),
+            deck_configs: Vec::new(),
+            tags: String::new(),
+        };
+
+        Ok(collection)
+    }
 }
 
 // The review log as stored in the database

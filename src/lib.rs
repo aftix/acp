@@ -9,4 +9,5 @@ extern crate json;
 extern crate rusqlite;
 extern crate serde;
 
+pub mod apkg;
 pub mod deck;
