@@ -226,10 +226,10 @@ impl Template {
 }
 
 impl Model {
-    // Parse a model from the JSON string inside the database
-    pub fn new(input: &str) -> json::Result<Self> {
+    // Parse a model from a JSON object
+    pub fn new(epoch: i64, json_model: &json::JsonValue) -> json::Result<Self> {
         let mut model = Model {
-            epoch: 0,
+            epoch,
             id: 0,
             css: String::from(""),
             deck_id: 0,
@@ -244,38 +244,11 @@ impl Model {
             usn: 0,
             req: None,
         };
-        let parsed = json::parse(input)?;
 
         // The model is an object at root level
-        if !parsed.is_object() {
-            return Err(json::JsonError::WrongType(String::from(
-                "Model is not an object",
-            )));
-        }
-
-        // Should have an object with key of epoch time
-        if parsed.len() != 1 {
-            return Err(json::JsonError::WrongType(String::from(
-                "Model is wrong length",
-            )));
-        }
-
-        // Get the key, value pair for the first (only) entry in the root object
-        let (model_key, json_model) = parsed.entries().next().unwrap();
-
-        // Epoch is the key for the first entry
-        let epoch = model_key.parse::<i64>();
-        if let Err(_) = epoch {
-            return Err(json::JsonError::WrongType(String::from(
-                "Model not named with epoch",
-            )));
-        }
-        model.epoch = epoch.unwrap();
-
-        // Make sure that we're working with an object
         if !json_model.is_object() {
             return Err(json::JsonError::WrongType(String::from(
-                "Nested model is not an object",
+                "Model is not an object",
             )));
         }
 
@@ -396,6 +369,33 @@ impl Model {
         }
 
         Ok(model)
+    }
+
+    // Parse all models from a string
+    pub fn parse(data: &str) -> json::JsonResult<Vec<Self>> {
+        let mut models = Vec::new();
+
+        let parsed = json::parse(data)?;
+
+        if !parsed.is_object() {
+            return Err(json::JsonError::WrongType(String::from(
+                "Models are not in an object",
+            )));
+        }
+
+        for (epoch, model) in parsed.entries() {
+            let epoch = epoch.parse::<i64>();
+            if let Err(_) = epoch {
+                return Err(json::JsonError::WrongType(String::from(
+                    "Model does not have proper id",
+                )));
+            }
+            let epoch = epoch.unwrap();
+
+            models.push(Model::new(epoch, model)?);
+        }
+
+        Ok(models)
     }
 }
 
