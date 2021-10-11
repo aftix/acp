@@ -12,3 +12,11 @@ rusqlite="0.26"
 json="0.12"
 serde={version="1.0", features=["derive"]}
 tempfile="3"
+argparse={version="0.2", optional=true}
+
+[features]
+build-binary = ["argparse"]
+
+[[bin]]
+name="acp"
+required-features=["build-binary"]

@@ -1,4 +1,5 @@
 use crate::deck;
+use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
     path::{Path, PathBuf},
@@ -7,10 +8,44 @@ use tempfile;
 use zip;
 
 // Owns the temporary extracted Apkg and the collection
+#[derive(Debug)]
 pub struct Apkg {
     dir: tempfile::TempDir,
     db_path: PathBuf,
+    media_path: PathBuf,
     collection: deck::Collection,
+    media: Vec<Media>,
+}
+
+// Media files in the apkg
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Media {
+    path: PathBuf,
+    name: String,
+}
+
+fn load_media(path: &Path) -> io::Result<Vec<Media>> {
+    let mut vec = Vec::new();
+
+    let contents = fs::read_to_string(path)?;
+    let json = json::parse(&contents).expect("Media JSON is not JSON");
+    if !json.is_object() {
+        return Ok(vec);
+    }
+
+    let dir = path.parent().unwrap();
+    for (condensed_name, value) in json.entries() {
+        if let Some(val) = value.as_str() {
+            let name = String::from(val);
+            let mediapath = dir.join(condensed_name);
+            vec.push(Media {
+                path: mediapath,
+                name,
+            });
+        }
+    }
+
+    Ok(vec)
 }
 
 impl Apkg {
@@ -59,12 +94,17 @@ impl Apkg {
         }
 
         let db_path = dir.path().join("collection.anki2");
+        let media_path = dir.path().join("media");
         let collection = deck::Collection::new(db_path.as_path()).unwrap();
+
+        let media = load_media(media_path.as_path())?;
 
         let apkg = Apkg {
             dir,
             db_path,
+            media_path,
             collection,
+            media,
         };
 
         Ok(apkg)
