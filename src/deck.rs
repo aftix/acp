@@ -5,15 +5,86 @@
  */
 
 use json;
-use rusqlite::{params, Connection, Result};
+use rusqlite::{Connection, Result};
 use serde::{Deserialize, Serialize};
-use std::{
-    io,
-    path::{Path, PathBuf},
-};
+use std::path::Path;
 
 // Information about database fields found at
 // https://github.com/ankidroid/Anki-Android/wiki/Database-Structure
+
+// Card type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CardType {
+    New,
+    Learning,
+    Review,
+    Relearning,
+}
+
+impl From<i64> for CardType {
+    fn from(i: i64) -> Self {
+        match i {
+            1 => CardType::Learning,
+            2 => CardType::Review,
+            3 => CardType::Relearning,
+            _ => CardType::New,
+        }
+    }
+}
+
+impl Into<i64> for CardType {
+    fn into(self) -> i64 {
+        match self {
+            CardType::New => 0,
+            CardType::Learning => 1,
+            CardType::Review => 2,
+            CardType::Relearning => 3,
+        }
+    }
+}
+
+// Queue for card
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CardQueue {
+    UserBuried,
+    Buried,
+    Suspended,
+    New,
+    Learning,
+    Review,
+    InLearning,
+    Preview,
+}
+
+impl From<i64> for CardQueue {
+    fn from(i: i64) -> Self {
+        match i {
+            -3 => CardQueue::UserBuried,
+            -2 => CardQueue::Buried,
+            -1 => CardQueue::Suspended,
+            1 => CardQueue::Learning,
+            2 => CardQueue::Review,
+            3 => CardQueue::InLearning,
+            4 => CardQueue::Preview,
+            _ => CardQueue::New,
+        }
+    }
+}
+
+impl Into<i64> for CardQueue {
+    fn into(self) -> i64 {
+        match self {
+            CardQueue::UserBuried => -3,
+            CardQueue::Buried => -2,
+            CardQueue::Suspended => -1,
+            CardQueue::New => 0,
+            CardQueue::Learning => 1,
+            CardQueue::Review => 2,
+            CardQueue::InLearning => 3,
+            CardQueue::Preview => 4,
+        }
+    }
+}
 
 // The card as stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -24,16 +95,16 @@ pub struct Card {
     ordinal: i64, // determines which of the card templates or cloze deletions it belongs to
     modification_time: i64, // seconds since epoch
     usn: i64,     // Update sequence number, used for syncs
-    card_type: i64, // 0 = new, 1 = learning, 2 = review, 3 = relearning
-    queue: i64,   // Where in the queue is the card
-    due: i64,     // When the card is due, usage depends on card type
-    interval: i64, // Interval, - is seconds, + is days
-    factor: i64,  // The ease factor of the card is parts per thousand (permille)
-    reps: i64,    // The number of reviews
-    left: i64,    // the number of reps left until graduation
-    original_due: i64, // Original due
+    card_type: CardType,
+    queue: CardQueue,      // Where in the queue is the card
+    due: i64,              // When the card is due, usage depends on card type
+    interval: i64,         // Interval, - is seconds, + is days
+    factor: i64,           // The ease factor of the card is parts per thousand (permille)
+    reps: i64,             // The number of reviews
+    left: i64,             // the number of reps left until graduation
+    original_due: i64,     // Original due
     original_deck_id: i64, // Used for filtered decks
-    flags: i64,   // The card flags
+    flags: i64,            // The card flags
 }
 
 // A field of the model as stored in the database
@@ -136,6 +207,31 @@ impl Request {
     }
 }
 
+// Decides what type a note model is
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ModelType {
+    Standard,
+    Cloze,
+}
+
+impl From<i64> for ModelType {
+    fn from(i: i64) -> Self {
+        match i {
+            1 => ModelType::Cloze,
+            _ => ModelType::Standard,
+        }
+    }
+}
+
+impl Into<i64> for ModelType {
+    fn into(self) -> i64 {
+        match self {
+            ModelType::Standard => 0,
+            ModelType::Cloze => 1,
+        }
+    }
+}
+
 // Model of note as stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Model {
@@ -150,7 +246,7 @@ pub struct Model {
     name: String,
     sort_field: i64,
     templates: Vec<Template>,
-    model_type: i64,
+    model_type: ModelType,
     usn: i64,
     req: Option<Vec<Vec<Request>>>,
 }
@@ -245,7 +341,7 @@ impl Model {
             name: String::from(""),
             sort_field: 0,
             templates: Vec::new(),
-            model_type: 0,
+            model_type: ModelType::Standard,
             usn: 0,
             req: None,
         };
@@ -329,8 +425,8 @@ impl Model {
             )));
         }
 
-        if let Some(t) = json_model["sortf"].as_i64() {
-            model.model_type = t;
+        if let Some(t) = json_model["type"].as_i64() {
+            model.model_type = t.into();
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "type field missing or incorrect",
@@ -667,11 +763,36 @@ impl Deck {
     }
 }
 
+// What to do with leeched cards
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum LeechAction {
+    Suspend,
+    Mark,
+}
+
+impl From<i64> for LeechAction {
+    fn from(i: i64) -> Self {
+        match i {
+            1 => LeechAction::Mark,
+            _ => LeechAction::Suspend,
+        }
+    }
+}
+
+impl Into<i64> for LeechAction {
+    fn into(self) -> i64 {
+        match self {
+            LeechAction::Suspend => 0,
+            LeechAction::Mark => 1,
+        }
+    }
+}
+
 // Configuration of lasped cards in the Deck configuration options
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LapsedConfig {
     delays: Vec<f64>,
-    leech_action: i64,
+    leech_action: LeechAction,
     leech_fails: i64,
     min_interval: i64,
     mult: f64,
@@ -681,7 +802,7 @@ impl LapsedConfig {
     pub fn new(json: &json::JsonValue) -> json::JsonResult<Self> {
         let mut lapsed = LapsedConfig {
             delays: Vec::new(),
-            leech_action: 0,
+            leech_action: LeechAction::Suspend,
             leech_fails: 0,
             min_interval: 0,
             mult: 0.0,
@@ -695,7 +816,7 @@ impl LapsedConfig {
 
         // Parse the lapse configuration
         if let Some(leech_action) = json["leechAction"].as_i64() {
-            lapsed.leech_action = leech_action;
+            lapsed.leech_action = leech_action.into();
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "leech leechAction field missing or incorrect",
@@ -746,6 +867,31 @@ impl LapsedConfig {
     }
 }
 
+// The order in which new cards are shown
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum NewOrder {
+    Random,
+    Due,
+}
+
+impl From<i64> for NewOrder {
+    fn from(i: i64) -> Self {
+        match i {
+            1 => NewOrder::Due,
+            _ => NewOrder::Random,
+        }
+    }
+}
+
+impl Into<i64> for NewOrder {
+    fn into(self) -> i64 {
+        match self {
+            NewOrder::Random => 0,
+            NewOrder::Due => 1,
+        }
+    }
+}
+
 // Configuration of new cards in the Deck configuration options
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NewConfig {
@@ -753,7 +899,7 @@ pub struct NewConfig {
     delays: Vec<f64>,
     initial_factor: i64,
     intervals: Vec<i64>,
-    order: i64,
+    order: NewOrder,
     per_day: i64,
     separate: i64,
 }
@@ -765,7 +911,7 @@ impl NewConfig {
             delays: Vec::new(),
             initial_factor: 0,
             intervals: Vec::new(),
-            order: 0,
+            order: NewOrder::Random,
             per_day: 0,
             separate: 0,
         };
@@ -794,7 +940,7 @@ impl NewConfig {
         }
 
         if let Some(order) = json["order"].as_i64() {
-            new.order = order;
+            new.order = order.into();
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "new order field missing or incorrect",
@@ -1066,12 +1212,40 @@ impl DeckConfig {
     }
 }
 
+// Spread of new cards in configuration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum NewSpread {
+    Distribute,
+    Last,
+    First,
+}
+
+impl From<i64> for NewSpread {
+    fn from(i: i64) -> Self {
+        match i {
+            1 => NewSpread::Last,
+            2 => NewSpread::First,
+            _ => NewSpread::Distribute,
+        }
+    }
+}
+
+impl Into<i64> for NewSpread {
+    fn into(self) -> i64 {
+        match self {
+            NewSpread::Distribute => 0,
+            NewSpread::Last => 1,
+            NewSpread::First => 2,
+        }
+    }
+}
+
 // Synced configuration options as represented in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncConfig {
     current_deck: i64,
     active_decks: Vec<i64>,
-    new_spread: i64,
+    new_spread: NewSpread,
     collapse_time: i64,
     time_limit: i64,
     estimated_times: bool,
@@ -1092,7 +1266,7 @@ impl SyncConfig {
         let mut conf = SyncConfig {
             current_deck: 0,
             active_decks: Vec::new(),
-            new_spread: 0,
+            new_spread: NewSpread::Distribute,
             collapse_time: 0,
             time_limit: 0,
             estimated_times: false,
@@ -1126,7 +1300,7 @@ impl SyncConfig {
         }
 
         if let Some(spread) = json["newSpread"].as_i64() {
-            conf.new_spread = spread;
+            conf.new_spread = spread.into();
         } else {
             return Err(json::JsonError::WrongType(String::from(
                 "SyncConfig newSpread field is missing or incorrect",
@@ -1265,18 +1439,65 @@ impl SyncConfig {
     }
 }
 
+// Which answer button was pressed in a review
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum ReviewAnswer {
+    Wrong,
+    Hard,
+    OK,
+    Easy,
+}
+
+// To/from i64 is a bit more complicated
+impl ReviewAnswer {
+    pub fn from_i64(is_review: bool, i: i64) -> Self {
+        if is_review {
+            match i {
+                2 => ReviewAnswer::Hard,
+                3 => ReviewAnswer::OK,
+                4 => ReviewAnswer::Easy,
+                _ => ReviewAnswer::Wrong,
+            }
+        } else {
+            match i {
+                2 => ReviewAnswer::OK,
+                3 => ReviewAnswer::Easy,
+                _ => ReviewAnswer::Wrong,
+            }
+        }
+    }
+
+    pub fn into_i64(self, is_review: bool) -> i64 {
+        if is_review {
+            match self {
+                ReviewAnswer::Wrong => 1,
+                ReviewAnswer::Hard => 2,
+                ReviewAnswer::OK => 3,
+                ReviewAnswer::Easy => 4,
+            }
+        } else {
+            match self {
+                ReviewAnswer::Wrong => 1,
+                ReviewAnswer::OK => 2,
+                ReviewAnswer::Easy => 3,
+                ReviewAnswer::Hard => 1,
+            }
+        }
+    }
+}
+
 // The review log as stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewLog {
-    id: i64,            // epoch-milliseconds of when the review was done
-    card_id: i64,       // Card id
-    usn: i64,           // update sequence number
-    ease: i64,          // Which button was pressed on the review
-    interval: i64,      // Card interval
-    last_interval: i64, // Previous card interval
-    factor: i64,        // factor
-    time: i64,          // How long the review took in milliseconds
-    card_type: i64,     // As in card_db
+    id: i64,             // epoch-milliseconds of when the review was done
+    card_id: i64,        // Card id
+    usn: i64,            // update sequence number
+    ease: ReviewAnswer,  // Which button was pressed on the review
+    interval: i64,       // Card interval
+    last_interval: i64,  // Previous card interval
+    factor: i64,         // factor
+    time: i64,           // How long the review took in milliseconds
+    card_type: CardType, // As in card_db
 }
 
 // The graves as stored in the database
@@ -1348,6 +1569,8 @@ impl Collection {
         // Load the cards
         let mut stmt = conn.prepare("SELECT id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags FROM cards")?;
         let card_iter = stmt.query_map([], |row| {
+            let card_type: i64 = row.get(6)?;
+            let card_queue: i64 = row.get(7)?;
             Ok(Card {
                 id: row.get(0)?,
                 note_id: row.get(1)?,
@@ -1355,8 +1578,8 @@ impl Collection {
                 ordinal: row.get(3)?,
                 modification_time: row.get(4)?,
                 usn: row.get(5)?,
-                card_type: row.get(6)?,
-                queue: row.get(7)?,
+                card_type: card_type.into(),
+                queue: card_queue.into(),
                 due: row.get(8)?,
                 interval: row.get(9)?,
                 factor: row.get(10)?,
@@ -1395,16 +1618,20 @@ impl Collection {
         let mut stmt = conn
             .prepare("SELECT id, cid, usn, ease, ivl, lastIvl, factor, time, type FROM revlog")?;
         let rev_iter = stmt.query_map([], |row| {
+            let card_type: i64 = row.get(8)?;
+            let revanswer: i64 = row.get(3)?;
+            let card_type: CardType = card_type.into();
+            let revanswer = ReviewAnswer::from_i64(card_type == CardType::Review, revanswer);
             Ok(ReviewLog {
                 id: row.get(0)?,
                 card_id: row.get(1)?,
                 usn: row.get(2)?,
-                ease: row.get(3)?,
+                ease: revanswer,
                 interval: row.get(4)?,
                 last_interval: row.get(5)?,
                 factor: row.get(6)?,
                 time: row.get(7)?,
-                card_type: row.get(8)?,
+                card_type,
             })
         })?;
 
