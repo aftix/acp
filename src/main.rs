@@ -38,7 +38,7 @@ fn main() {
                 "Be verbose",
             );
             ap.refer(&mut infile)
-                .add_option(&["-i", "--input"], Store, "Input apkg file");
+                .add_argument("input", Store, "Input apkg file");
             ap.refer(&mut outfile)
                 .add_option(&["-o", "--output"], Store, "Output apkg file");
             ap.parse_args_or_exit();

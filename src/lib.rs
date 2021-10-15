@@ -5,6 +5,7 @@
  * See repository LICENSE for information.
  */
 
+#[macro_use]
 extern crate json;
 extern crate rusqlite;
 extern crate serde;

@@ -5,7 +5,7 @@
  */
 
 use json;
-use rusqlite::{Connection, Result};
+use rusqlite::{Batch, Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -124,7 +124,7 @@ pub struct Template {
     answer_format: String,
     back_format: String,
     browser_format: String,
-    deck_overide: Option<i64>,
+    deck_override: Option<i64>,
     name: String,
     ordinal: i64,
     question_format: String,
@@ -143,7 +143,7 @@ impl Request {
     pub fn new(json: &json::JsonValue) -> json::JsonResult<Self> {
         let mut req = Request {
             ordinal: 0,
-            string: String::from(""),
+            string: String::new(),
             list: Vec::new(),
         };
 
@@ -205,6 +205,16 @@ impl Request {
 
         Ok(req)
     }
+
+    pub fn to_json(self) -> json::JsonValue {
+        let mut json = array! { self.ordinal, self.string};
+        let mut inner_array = array! {};
+        for l in self.list.into_iter() {
+            inner_array.push(l).unwrap();
+        }
+        json.push(inner_array).unwrap();
+        json
+    }
 }
 
 // Decides what type a note model is
@@ -248,7 +258,7 @@ pub struct Model {
     templates: Vec<Template>,
     model_type: ModelType,
     usn: i64,
-    req: Option<Vec<Vec<Request>>>,
+    req: Option<Vec<Request>>,
 }
 
 impl Template {
@@ -257,7 +267,7 @@ impl Template {
             answer_format: String::from(""),
             back_format: String::from(""),
             browser_format: String::from(""),
-            deck_overide: None,
+            deck_override: None,
             name: String::from(""),
             ordinal: 0,
             question_format: String::from(""),
@@ -311,7 +321,7 @@ impl Template {
         }
 
         if let Some(over) = json["did"].as_i64() {
-            template.deck_overide = Some(over);
+            template.deck_override = Some(over);
         }
 
         if let Some(ord) = json["ord"].as_i64() {
@@ -323,6 +333,33 @@ impl Template {
         }
 
         Ok(template)
+    }
+
+    pub fn into_json(self) -> json::JsonValue {
+        let mut json = object! {
+            afmt: self.answer_format,
+            bafmt: self.back_format,
+            bqfmt: self.browser_format,
+            name: self.name,
+            ord: self.ordinal,
+            qfmt: self.question_format,
+        };
+
+        if let Some(did) = self.deck_override {
+            json.insert("did", did).unwrap();
+        }
+
+        json
+    }
+
+    pub fn into_json_all(v: Vec<Self>) -> json::JsonValue {
+        let mut json = array! {};
+
+        for i in v.into_iter().map(Self::into_json) {
+            json.push(i).unwrap();
+        }
+
+        json
     }
 }
 
@@ -444,19 +481,9 @@ impl Model {
         // Parse the req field, if it's there
         let ref req = json_model["req"];
         if req.is_array() {
-            let mut req_vec: Vec<Vec<Request>> = Vec::new();
+            let mut req_vec: Vec<Request> = Vec::new();
             for member in req.members() {
-                let mut req_vec_vec = Vec::new();
-                if !member.is_array() {
-                    return Err(json::JsonError::WrongType(String::from(
-                        "req inner member not array",
-                    )));
-                }
-                for submember in req.members() {
-                    req_vec_vec.push(Request::new(submember)?);
-                }
-
-                req_vec.push(req_vec_vec);
+                req_vec.push(Request::new(member)?);
             }
 
             model.req = Some(req_vec);
@@ -502,6 +529,55 @@ impl Model {
         }
 
         Ok(models)
+    }
+
+    pub fn to_json(self) -> (i64, json::JsonValue) {
+        let mut json = object! {
+            css: self.css,
+            id: self.id,
+            latexPost: self.latex_post,
+            latexPre: self.latex_pre,
+            "mod": self.modification_time,
+            name: self.name,
+            sortf: self.sort_field,
+            tags: array!{},
+            usn: self.usn,
+            vers: array!{},
+        };
+
+        let mtype: i64 = self.model_type.into();
+        json.insert("type", mtype).unwrap();
+
+        if let Some(i) = self.deck_id {
+            json.insert("did", i).unwrap();
+        }
+
+        let mut flds = array! {};
+        for fld in self.fields.into_iter() {
+            flds.push(object! {
+                font: fld.font,
+                name: fld.name,
+                ord: fld.ordinal,
+                rtl: fld.right_to_left,
+                size: fld.font_size,
+                sticky: fld.sticky,
+            })
+            .unwrap();
+        }
+        json.insert("flds", flds).unwrap();
+
+        if let Some(vec) = self.req {
+            let mut outer_array = array! {};
+            for v in vec.into_iter() {
+                outer_array.push(v.to_json()).unwrap();
+            }
+            json.insert("req", outer_array).unwrap();
+        }
+
+        json.insert("tmpls", Template::into_json_all(self.templates))
+            .unwrap();
+
+        (self.epoch, json)
     }
 }
 
@@ -761,6 +837,37 @@ impl Deck {
 
         Ok(decks)
     }
+
+    pub fn to_json(self) -> (i64, json::JsonValue) {
+        let json = object! {
+            name: self.name,
+            extendRev: self.extended_review_limit,
+            usn: self.usn,
+            collapsed: self.collapsed,
+            browserCollapsed: self.browser_collapsed,
+            newToday: array!{self.new_today.0, self.new_today.1},
+            revToday: array!{self.reviewed_today.0, self.reviewed_today.1},
+            lrnToday: array!{self.learned_today.0, self.learned_today.1},
+            "dyn": self.dynamic,
+            extendNew: self.extended_review_limit,
+            conf: self.config_id,
+            id: self.id,
+            "mod": self.modification_time,
+            desc: self.description,
+        };
+
+        (self.epoch, json)
+    }
+
+    pub fn to_json_all(v: Vec<Self>) -> json::JsonValue {
+        let mut json = json::JsonValue::new_object();
+
+        for (epoch, val) in v.into_iter().map(Self::to_json) {
+            json.insert(&epoch.to_string(), val).unwrap();
+        }
+
+        json
+    }
 }
 
 // What to do with leeched cards
@@ -864,6 +971,25 @@ impl LapsedConfig {
         }
 
         Ok(lapsed)
+    }
+
+    pub fn to_json(self) -> json::JsonValue {
+        let mut json = object! {
+            leechFails: self.leech_fails,
+            minInt: self.min_interval,
+            mult: self.mult,
+        };
+
+        let leech_action: i64 = self.leech_action.into();
+        json.insert("leechAction", leech_action).unwrap();
+
+        let mut delays = array! {};
+        for delay in self.delays.into_iter() {
+            delays.push(delay).unwrap();
+        }
+        json.insert("delays", delays).unwrap();
+
+        json
     }
 }
 
@@ -992,6 +1118,32 @@ impl NewConfig {
 
         Ok(new)
     }
+
+    pub fn to_json(self) -> json::JsonValue {
+        let mut json = object! {
+            bury: self.bury,
+            initialFactor: self.initial_factor,
+            perDay: self.per_day,
+            separate: self.separate,
+        };
+
+        let mut delays = array! {};
+        for delay in self.delays.into_iter() {
+            delays.push(delay).unwrap();
+        }
+        json.insert("delays", delays).unwrap();
+
+        let order: i64 = self.order.into();
+        json.insert("order", order).unwrap();
+
+        let mut ivls = array! {};
+        for ivl in self.intervals.into_iter() {
+            ivls.push(ivl).unwrap();
+        }
+        json.insert("ints", ivls).unwrap();
+
+        json
+    }
 }
 
 // Configuration of review cards in the Deck configuration options
@@ -1069,6 +1221,22 @@ impl ReviewConfig {
         }
 
         Ok(rev)
+    }
+
+    pub fn to_json(self) -> json::JsonValue {
+        let mut json = object! {
+            bury: self.bury,
+            ease4: self.ease4,
+            ivlFct: self.interval_factor,
+            maxIvl: self.max_interval,
+            perDay: self.per_day,
+        };
+
+        if let Some(f) = self.fuzz {
+            json.insert("fuzz", f).unwrap();
+        }
+
+        json
     }
 }
 
@@ -1209,6 +1377,36 @@ impl DeckConfig {
         }
 
         Ok(confs)
+    }
+
+    pub fn to_json(self) -> (i64, json::JsonValue) {
+        let mut json = object! {
+            autoplay: self.autoplay,
+            "dyn": self.dynamic,
+            id: self.id,
+            maxTaken: self.max_taken,
+            "mod": self.modification_time,
+            name: self.name,
+            replayq: self.replay_audio,
+            timer: self.timer,
+            usn: self.usn
+        };
+
+        json.insert("rev", self.review.unwrap().to_json()).unwrap();
+        json.insert("new", self.new.unwrap().to_json()).unwrap();
+        json.insert("lapse", self.lapse.unwrap().to_json()).unwrap();
+
+        (self.id, json)
+    }
+
+    pub fn to_json_all(v: Vec<Self>) -> json::JsonValue {
+        let mut json = json::JsonValue::new_object();
+
+        for (id, val) in v.into_iter().map(Self::to_json) {
+            json.insert(&id.to_string(), val).unwrap();
+        }
+
+        json
     }
 }
 
@@ -1437,6 +1635,44 @@ impl SyncConfig {
 
         Ok(conf)
     }
+
+    pub fn to_json(self) -> json::JsonValue {
+        let mut json = object! {
+            curDeck: self.current_deck,
+            collapseTime: self.collapse_time,
+            timeLim: self.time_limit,
+            estTimes: self.estimated_times,
+            dueCounts: self.due_counts,
+            curModel: self.current_model,
+            nextPos: self.next_pos,
+            sortBackwards: self.sort_backwards,
+            addToCur: self.add_to_current,
+            dayLearnFirst: self.day_learn_first,
+        };
+
+        let mut active_decks = array! {};
+        for active in self.active_decks.into_iter() {
+            active_decks.push(active).unwrap();
+        }
+        json.insert("activeDecks", active_decks).unwrap();
+
+        if let Some(s) = self.sort_type {
+            json.insert("sortType", s).unwrap();
+        }
+
+        if let Some(b) = self.new_bury {
+            json.insert("newBury", b).unwrap();
+        }
+
+        if let Some(i) = self.last_unburied {
+            json.insert("lastUnburied", i).unwrap();
+        }
+
+        let active_cols: String = self.active_cols.join(" ");
+        json.insert("activeCols", active_cols).unwrap();
+
+        json
+    }
 }
 
 // Which answer button was pressed in a review
@@ -1650,5 +1886,106 @@ impl Collection {
         collection.graves = grave_iter.map(|result| result.unwrap()).collect();
 
         Ok(collection)
+    }
+
+    pub fn save(self, path: &Path) -> Result<()> {
+        // Open the database
+        let conn = Connection::open(path)?;
+
+        // Drop any preexisting tables
+        let sql = r"
+            TRUNCATE TABLE cards;
+            TRUNCATE TABLE notes;
+            TRUNCATE TABLE col;
+            TRUNCATE TABLE graves;
+            TRUNCATE TABLE revlog;
+        ";
+        let mut batch = Batch::new(&conn, sql);
+        while let Some(mut stmt) = batch.next()? {
+            stmt.execute([])?;
+        }
+
+        /*
+        // Add the tables back in again
+        let sql = r"
+            CREATE TABLE cards (
+                id integer primary key,
+                nid integer not null,
+                did integer not null,
+                ord integer not null,
+                mod integer not null,
+                usn integer not null,
+                type integer not null,
+                queue integer not null,
+                due integer not null,
+                ivl integer not null,
+                factor integer not null,
+                reps integer not null,
+                lapses integer not null,
+                left integer not null,
+                odue integer not null,
+                odid integer not null,
+                flags integer not null,
+                data text not null
+            );
+            CREATE TABLE col (
+                id integer primary key,
+                crt integer not null,
+                mod integer not null,
+                scm integer not null,
+                ver integer not null,
+                dty integer not null,
+                usn integer not null,
+                ls integer not null,
+                conf text not null,
+                models text not null,
+                decks text not null,
+                dconf text not null,
+                tags text not null
+            );
+            CREATE TABLE graves (
+                usn integer not null,
+                oid integer not null,
+                type integer not null
+            );
+            CREATE TABLE revlog (
+                id integer primary key,
+                cid integer not null,
+                usn integer not null,
+                ease integer not null,
+                ease integer not null,
+                ivl integer not null,
+                lastIvl integer not null,
+                factor integer not null,
+                time integer not null,
+                type integer not null
+            );
+            CREATE TABLE notes(
+                id integer primary key,
+                guid text not null,
+                mid integer not null,
+                mod integer not null,
+                usn integer not null,
+                tags text not null,
+                flds text not null,
+                sfld integer not null,
+                csum integer not null,
+                flags integer not null,
+                data text not null
+            );
+            CREATE INDEX ix_cards_nid on cards (nid);
+            CREATE INDEX ix_cards_sched on cards (did, queue, due);
+            CREATE INDEX ix_cards_usn on cards (usn);
+            CREATE INDEX ix_notes_csum on notes (csum);
+            CREATE INDEX ix_notes_usn on notes (usn);
+            CREATE INDEX ix_revlog_cid on revlog (cid);
+            CREATE INDEX ix_revlog_usn on revlog (usn);
+        ";
+        let mut batch = Batch::new(&conn, sql);
+        while let Some(mut stmt) = batch.next()? {
+            stmt.execute([])?;
+        }*/
+
+        Ok(())
     }
 }
