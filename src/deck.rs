@@ -112,7 +112,7 @@ impl Card {
     pub fn save(self, conn: &Connection) -> Result<()> {
         let card_type: i64 = self.card_type.into();
         let card_queue: i64 = self.queue.into();
-        conn.execute("INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, laspses, left, odue, odid, flags, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17);",
+        conn.execute("INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18);",
         params![
             self.id,
             self.note_id,
@@ -139,9 +139,9 @@ impl Card {
 
     pub fn save_all(conn: &Connection, v: Vec<Self>) -> Result<()> {
         let sql = r"INSERT INTO cards (
-                id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, laspses, left, odue, odid, flags, data
+                id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, lapses, left, odue, odid, flags, data
             ) VALUES (
-                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18
             );";
 
         let mut batch = Batch::new(conn, sql);
@@ -185,6 +185,95 @@ pub struct Field {
     right_to_left: bool,
     font_size: i64,
     sticky: bool,
+}
+
+impl Field {
+    pub fn new(json: &json::JsonValue) -> json::JsonResult<Self> {
+        if !json.is_object() {
+            return Err(json::JsonError::WrongType(String::from(
+                "Field is not object",
+            )));
+        }
+
+        let mut field = Field {
+            font: String::new(),
+            name: String::new(),
+            ordinal: 0,
+            right_to_left: false,
+            font_size: 0,
+            sticky: false,
+        };
+
+        if let Some(s) = json["font"].as_str() {
+            field.font = String::from(s);
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Field font field is missing or invalid",
+            )));
+        }
+
+        if let Some(s) = json["name"].as_str() {
+            field.name = String::from(s);
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Field name field is missing or invalid",
+            )));
+        }
+
+        if let Some(ord) = json["ord"].as_i64() {
+            field.ordinal = ord;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Field ord field is missing or invalid",
+            )));
+        }
+
+        if let Some(rtl) = json["rtl"].as_bool() {
+            field.right_to_left = rtl;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Field rtl field is missing or invalid",
+            )));
+        }
+
+        if let Some(size) = json["size"].as_i64() {
+            field.font_size = size;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Field size field is missing or invalid",
+            )));
+        }
+
+        if let Some(sticky) = json["sticky"].as_bool() {
+            field.sticky = sticky;
+        } else {
+            return Err(json::JsonError::WrongType(String::from(
+                "Field sticky field is missing or invalid",
+            )));
+        }
+
+        Ok(field)
+    }
+
+    pub fn to_json(self) -> json::JsonValue {
+        object! {
+            font: self.font,
+            media: array![],
+            name: self.name,
+            ord: self.ordinal,
+            rtl: self.right_to_left,
+            size: self.font_size,
+            sticky: self.sticky,
+        }
+    }
+
+    pub fn to_json_all(v: Vec<Self>) -> json::JsonValue {
+        let mut flds = array! {};
+        for i in v.into_iter().map(Self::to_json) {
+            flds.push(i).unwrap();
+        }
+        flds
+    }
 }
 
 // A template of the model as stored in the database
@@ -416,6 +505,8 @@ impl Template {
 
         if let Some(did) = self.deck_override {
             json.insert("did", did).unwrap();
+        } else {
+            json.insert("did", json::JsonValue::Null).unwrap();
         }
 
         json
@@ -570,6 +661,17 @@ impl Model {
             model.templates.push(Template::new(member)?);
         }
 
+        let ref fields = json_model["flds"];
+        if !fields.is_array() {
+            return Err(json::JsonError::WrongType(String::from(
+                "flds is not array",
+            )));
+        }
+
+        for member in fields.members() {
+            model.fields.push(Field::new(member)?);
+        }
+
         Ok(model)
     }
 
@@ -619,21 +721,12 @@ impl Model {
 
         if let Some(i) = self.deck_id {
             json.insert("did", i).unwrap();
+        } else {
+            json.insert("did", json::JsonValue::Null).unwrap();
         }
 
-        let mut flds = array! {};
-        for fld in self.fields.into_iter() {
-            flds.push(object! {
-                font: fld.font,
-                name: fld.name,
-                ord: fld.ordinal,
-                rtl: fld.right_to_left,
-                size: fld.font_size,
-                sticky: fld.sticky,
-            })
+        json.insert("flds", Field::to_json_all(self.fields))
             .unwrap();
-        }
-        json.insert("flds", flds).unwrap();
 
         if let Some(vec) = self.req {
             let mut outer_array = array! {};
@@ -982,6 +1075,7 @@ impl Deck {
             id: self.id,
             "mod": self.modification_time,
             desc: self.description,
+            timeToday: array!{0, 0},
         };
 
         (self.epoch, json)
@@ -2124,11 +2218,11 @@ impl Collection {
 
         // Drop any preexisting tables
         let sql = r"
-            TRUNCATE TABLE cards;
-            TRUNCATE TABLE notes;
-            TRUNCATE TABLE col;
-            TRUNCATE TABLE graves;
-            TRUNCATE TABLE revlog;
+            DELETE FROM cards;
+            DELETE FROM notes;
+            DELETE FROM col;
+            DELETE FROM graves;
+            DELETE FROM revlog;
         ";
         let mut batch = Batch::new(&conn, sql);
         while let Some(mut stmt) = batch.next()? {

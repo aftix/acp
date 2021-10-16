@@ -23,6 +23,18 @@ impl Options {
 }
 
 fn main() {
+    let options = parse_args();
+
+    println!("{:?}", options);
+
+    let apkg = apkg::Apkg::new(&options.infile.expect("No apkg specified!")).unwrap();
+
+    if let Some(out) = options.outfile {
+        apkg.save(out.as_path()).unwrap();
+    }
+}
+
+fn parse_args() -> Options {
     let mut options = Options::new();
 
     // Parse arguments
@@ -56,7 +68,5 @@ fn main() {
         }
     }
 
-    println!("{:?}", options);
-
-    let apkg = apkg::Apkg::new(&options.infile.expect("No apkg specified!")).unwrap();
+    options
 }

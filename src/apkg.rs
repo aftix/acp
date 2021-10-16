@@ -2,6 +2,7 @@ use crate::deck;
 use serde::{Deserialize, Serialize};
 use std::{
     fs, io,
+    io::Write,
     path::{Path, PathBuf},
 };
 use tempfile;
@@ -46,6 +47,22 @@ fn load_media(path: &Path) -> io::Result<Vec<Media>> {
     }
 
     Ok(vec)
+}
+
+// Path is path to "media", v is the entries in the JSON
+fn save_media(path: &Path, v: Vec<Media>) -> io::Result<()> {
+    fs::remove_file(path)?;
+    let mut json = object! {};
+
+    for media in v.into_iter() {
+        let name = media.path.file_name().unwrap();
+        json.insert(name.to_str().unwrap(), media.name).unwrap();
+    }
+
+    let json_text = json::stringify(json);
+
+    let mut file = fs::File::create(path)?;
+    file.write_all(json_text.as_bytes())
 }
 
 impl Apkg {
@@ -95,7 +112,11 @@ impl Apkg {
 
         let db_path = dir.path().join("collection.anki2");
         let media_path = dir.path().join("media");
-        let collection = deck::Collection::new(db_path.as_path()).unwrap();
+        let collection = deck::Collection::new(db_path.as_path());
+        if let Err(err) = collection {
+            return Err(io::Error::new(io::ErrorKind::Other, err));
+        }
+        let collection = collection.unwrap();
 
         let media = load_media(media_path.as_path())?;
 
@@ -108,5 +129,46 @@ impl Apkg {
         };
 
         Ok(apkg)
+    }
+
+    pub fn save(self, path: &Path) -> io::Result<()> {
+        // Write to temporary directory
+        save_media(self.media_path.as_path(), self.media)?;
+        if let Err(err) = self.collection.save(self.db_path.as_path()) {
+            return Err(io::Error::new(io::ErrorKind::Other, err));
+        }
+
+        // Zip the archive
+        let file = fs::File::create(path)?;
+        let mut zip = zip::ZipWriter::new(file);
+        let options =
+            zip::write::FileOptions::default().compression_method(zip::CompressionMethod::Stored);
+
+        let dir_path = self.dir.path();
+        let paths = fs::read_dir(dir_path)?;
+
+        for path in paths {
+            if let Err(err) = path {
+                return Err(io::Error::new(io::ErrorKind::Other, err));
+            }
+            let path = path.unwrap();
+            if let Err(err) =
+                zip.start_file(path.path().file_name().unwrap().to_str().unwrap(), options)
+            {
+                return Err(io::Error::new(io::ErrorKind::Other, err));
+            }
+
+            let contents = fs::read(path.path())?;
+            if let Err(err) = zip.write(&contents[..]) {
+                return Err(io::Error::new(io::ErrorKind::Other, err));
+            }
+        }
+
+        // Finish
+        if let Err(err) = zip.finish() {
+            return Err(io::Error::new(io::ErrorKind::Other, err));
+        }
+
+        Ok(())
     }
 }
