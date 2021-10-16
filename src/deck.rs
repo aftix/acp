@@ -5,7 +5,7 @@
  */
 
 use json;
-use rusqlite::{Batch, Connection, Result};
+use rusqlite::{params, Batch, Connection, Result};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -96,15 +96,84 @@ pub struct Card {
     modification_time: i64, // seconds since epoch
     usn: i64,     // Update sequence number, used for syncs
     card_type: CardType,
-    queue: CardQueue,      // Where in the queue is the card
-    due: i64,              // When the card is due, usage depends on card type
-    interval: i64,         // Interval, - is seconds, + is days
-    factor: i64,           // The ease factor of the card is parts per thousand (permille)
-    reps: i64,             // The number of reviews
+    queue: CardQueue, // Where in the queue is the card
+    due: i64,         // When the card is due, usage depends on card type
+    interval: i64,    // Interval, - is seconds, + is days
+    factor: i64,      // The ease factor of the card is parts per thousand (permille)
+    reps: i64,        // The number of reviews
+    lapses: i64,
     left: i64,             // the number of reps left until graduation
     original_due: i64,     // Original due
     original_deck_id: i64, // Used for filtered decks
     flags: i64,            // The card flags
+}
+
+impl Card {
+    pub fn save(self, conn: &Connection) -> Result<()> {
+        let card_type: i64 = self.card_type.into();
+        let card_queue: i64 = self.queue.into();
+        conn.execute("INSERT INTO cards (id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, laspses, left, odue, odid, flags, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17);",
+        params![
+            self.id,
+            self.note_id,
+            self.deck_id,
+            self.ordinal,
+            self.modification_time,
+            self.usn,
+            card_type,
+            card_queue,
+            self.due,
+            self.interval,
+            self.factor,
+            self.reps,
+            self.lapses,
+            self.left,
+            self.original_due,
+            self.original_deck_id,
+            self.flags,
+            String::new(),
+        ]
+            )?;
+        Ok(())
+    }
+
+    pub fn save_all(conn: &Connection, v: Vec<Self>) -> Result<()> {
+        let sql = r"INSERT INTO cards (
+                id, nid, did, ord, mod, usn, type, queue, due, ivl, factor, reps, laspses, left, odue, odid, flags, data
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17
+            );";
+
+        let mut batch = Batch::new(conn, sql);
+        if let Some(mut stmt) = batch.next()? {
+            for item in v.into_iter() {
+                let card_type: i64 = item.card_type.into();
+                let card_queue: i64 = item.queue.into();
+                stmt.execute(params![
+                    item.id,
+                    item.note_id,
+                    item.deck_id,
+                    item.ordinal,
+                    item.modification_time,
+                    item.usn,
+                    card_type,
+                    card_queue,
+                    item.due,
+                    item.interval,
+                    item.factor,
+                    item.reps,
+                    item.lapses,
+                    item.left,
+                    item.original_due,
+                    item.original_deck_id,
+                    item.flags,
+                    String::new(),
+                ])?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // A field of the model as stored in the database
@@ -579,6 +648,16 @@ impl Model {
 
         (self.epoch, json)
     }
+
+    pub fn to_json_all(v: Vec<Self>) -> json::JsonValue {
+        let mut json = object! {};
+
+        for (epoch, model) in v.into_iter().map(Self::to_json) {
+            json.insert(&epoch.to_string(), model).unwrap();
+        }
+
+        json
+    }
 }
 
 // The note as stored in the database
@@ -593,6 +672,55 @@ pub struct Note {
     fields: Vec<String>, // Field values
     sort_field: String,  // Sort field,
     sum: i64,            // Field checksum
+}
+
+impl Note {
+    pub fn save(self, conn: &Connection) -> Result<()> {
+        conn.execute("INSERT INTO notes (id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![
+                self.id,
+                self.guid,
+                self.model_id,
+                self.mod_time,
+                self.usn,
+                self.tags.join(" "),
+                self.fields.join("\0x1f"),
+                self.sort_field,
+                self.sum,
+                0,
+                String::new(),
+            ])?;
+        Ok(())
+    }
+
+    pub fn save_all(conn: &Connection, v: Vec<Self>) -> Result<()> {
+        let sql = r"INSERT INTO notes (
+            id, guid, mid, mod, usn, tags, flds, sfld, csum, flags, data
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11
+            );";
+
+        let mut batch = Batch::new(conn, sql);
+        if let Some(mut stmt) = batch.next()? {
+            for item in v.into_iter() {
+                stmt.execute(params![
+                    item.id,
+                    item.guid,
+                    item.model_id,
+                    item.mod_time,
+                    item.usn,
+                    item.tags.join(" "),
+                    item.fields.join("\0x1f"),
+                    item.sort_field,
+                    item.sum,
+                    0,
+                    String::new()
+                ])?;
+            }
+        }
+
+        Ok(())
+    }
 }
 
 // A deck as stored in the database
@@ -1736,12 +1864,112 @@ pub struct ReviewLog {
     card_type: CardType, // As in card_db
 }
 
+impl ReviewLog {
+    pub fn save(self, conn: &Connection) -> Result<()> {
+        let ease: i64 = self.ease.into_i64(self.card_type == CardType::Review);
+        let card_type: i64 = self.card_type.into();
+        conn.execute("INSERT INTO revlog (id, cid, usn, ease, ivl, lastIvl, factor, time, type) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9);",
+            params![
+                self.id,
+                self.card_id,
+                self.usn,
+                ease,
+                self.interval,
+                self.last_interval,
+                self.factor,
+                self.time,
+                card_type,
+            ])?;
+        Ok(())
+    }
+
+    pub fn save_all(conn: &Connection, v: Vec<Self>) -> Result<()> {
+        let sql = r"INSERT INTO revlog (
+                id, cid, usn, ease, ivl, lastIvl, factor, time, type
+            ) VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
+            );";
+
+        let mut batch = Batch::new(conn, sql);
+        if let Some(mut stmt) = batch.next()? {
+            for item in v.into_iter() {
+                let ease: i64 = item.ease.into_i64(item.card_type == CardType::Review);
+                let card_type: i64 = item.card_type.into();
+                stmt.execute(params![
+                    item.id,
+                    item.card_id,
+                    item.usn,
+                    ease,
+                    item.interval,
+                    item.last_interval,
+                    item.factor,
+                    item.time,
+                    card_type,
+                ])?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+// Grave Type
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum GraveType {
+    Card,
+    Note,
+    Deck,
+}
+
+impl From<i64> for GraveType {
+    fn from(i: i64) -> Self {
+        match i {
+            1 => GraveType::Note,
+            2 => GraveType::Deck,
+            _ => GraveType::Card,
+        }
+    }
+}
+
+impl Into<i64> for GraveType {
+    fn into(self) -> i64 {
+        match self {
+            GraveType::Card => 0,
+            GraveType::Note => 1,
+            GraveType::Deck => 2,
+        }
+    }
+}
+
 // The graves as stored in the database
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Grave {
     usn: i64,
     oid: i64,
-    grave_type: i64,
+    grave_type: GraveType,
+}
+
+impl Grave {
+    pub fn save(self, conn: &Connection) -> Result<()> {
+        let grave_type: i64 = self.grave_type.into();
+        conn.execute(
+            "INSERT INTO graves (usn, oid, type) VALUES (?1, ?2, ?3);",
+            params![self.usn, self.oid, grave_type],
+        )?;
+        Ok(())
+    }
+
+    pub fn save_all(conn: &Connection, v: Vec<Self>) -> Result<()> {
+        let sql = r"INSERT INTO graves (usn, oid, type) VALUES (?1, ?2, ?3);";
+        let mut batch = Batch::new(conn, sql);
+        if let Some(mut stmt) = batch.next()? {
+            for item in v.into_iter() {
+                let grave_type: i64 = item.grave_type.into();
+                stmt.execute(params![item.usn, item.oid, grave_type])?;
+            }
+        }
+        Ok(())
+    }
 }
 
 // The collection information as stored in the database
@@ -1820,10 +2048,11 @@ impl Collection {
                 interval: row.get(9)?,
                 factor: row.get(10)?,
                 reps: row.get(11)?,
-                left: row.get(12)?,
-                original_due: row.get(13)?,
-                original_deck_id: row.get(14)?,
-                flags: row.get(15)?,
+                lapses: row.get(12)?,
+                left: row.get(13)?,
+                original_due: row.get(14)?,
+                original_deck_id: row.get(15)?,
+                flags: row.get(16)?,
             })
         })?;
 
@@ -1876,10 +2105,11 @@ impl Collection {
         // Load the graves
         let mut stmt = conn.prepare("SELECT usn, oid, type FROM graves")?;
         let grave_iter = stmt.query_map([], |row| {
+            let grave_type: i64 = row.get(2)?;
             Ok(Grave {
                 usn: row.get(0)?,
                 oid: row.get(1)?,
-                grave_type: row.get(2)?,
+                grave_type: grave_type.into(),
             })
         })?;
 
@@ -1905,86 +2135,29 @@ impl Collection {
             stmt.execute([])?;
         }
 
-        /*
-        // Add the tables back in again
-        let sql = r"
-            CREATE TABLE cards (
-                id integer primary key,
-                nid integer not null,
-                did integer not null,
-                ord integer not null,
-                mod integer not null,
-                usn integer not null,
-                type integer not null,
-                queue integer not null,
-                due integer not null,
-                ivl integer not null,
-                factor integer not null,
-                reps integer not null,
-                lapses integer not null,
-                left integer not null,
-                odue integer not null,
-                odid integer not null,
-                flags integer not null,
-                data text not null
-            );
-            CREATE TABLE col (
-                id integer primary key,
-                crt integer not null,
-                mod integer not null,
-                scm integer not null,
-                ver integer not null,
-                dty integer not null,
-                usn integer not null,
-                ls integer not null,
-                conf text not null,
-                models text not null,
-                decks text not null,
-                dconf text not null,
-                tags text not null
-            );
-            CREATE TABLE graves (
-                usn integer not null,
-                oid integer not null,
-                type integer not null
-            );
-            CREATE TABLE revlog (
-                id integer primary key,
-                cid integer not null,
-                usn integer not null,
-                ease integer not null,
-                ease integer not null,
-                ivl integer not null,
-                lastIvl integer not null,
-                factor integer not null,
-                time integer not null,
-                type integer not null
-            );
-            CREATE TABLE notes(
-                id integer primary key,
-                guid text not null,
-                mid integer not null,
-                mod integer not null,
-                usn integer not null,
-                tags text not null,
-                flds text not null,
-                sfld integer not null,
-                csum integer not null,
-                flags integer not null,
-                data text not null
-            );
-            CREATE INDEX ix_cards_nid on cards (nid);
-            CREATE INDEX ix_cards_sched on cards (did, queue, due);
-            CREATE INDEX ix_cards_usn on cards (usn);
-            CREATE INDEX ix_notes_csum on notes (csum);
-            CREATE INDEX ix_notes_usn on notes (usn);
-            CREATE INDEX ix_revlog_cid on revlog (cid);
-            CREATE INDEX ix_revlog_usn on revlog (usn);
-        ";
-        let mut batch = Batch::new(&conn, sql);
-        while let Some(mut stmt) = batch.next()? {
-            stmt.execute([])?;
-        }*/
+        // Save the collection itself
+
+        // Get JSON strings
+        let config = self.config.to_json();
+        let decks = Deck::to_json_all(self.decks);
+        let deck_configs = DeckConfig::to_json_all(self.deck_configs);
+        let models = Model::to_json_all(self.models);
+
+        let config = json::stringify(config);
+        let decks = json::stringify(decks);
+        let deck_configs = json::stringify(deck_configs);
+        let models = json::stringify(models);
+
+        // SQL Query
+        conn.execute("INSERT INTO col (id, crt, mod, scm, ver, dty, usn, ls, conf, models, decks, dconf, tags) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+        params![self.id, self.crt, self.modification_time, self.schema_time, self.version, 0, self.usn, self.last_sync, config, models, decks, deck_configs, self.tags]
+            )?;
+
+        // Save the other things
+        Note::save_all(&conn, self.notes)?;
+        Card::save_all(&conn, self.cards)?;
+        ReviewLog::save_all(&conn, self.revlog)?;
+        Grave::save_all(&conn, self.graves)?;
 
         Ok(())
     }
